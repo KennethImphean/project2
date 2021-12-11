@@ -46,92 +46,174 @@ class_diag <- function(score, truth, positive, cutoff=.5){
 
 # Mining, Classification, Prediction
 
-## Name and EID here
+## Kenneth Imphean ksi238
 
 ### Introduction 
 
-Paragraph or two introducing your datasets and variables, why they are interesting to you, etc. See instructions for more information
+ The two datasets I have used before on Project 1. I have chosen County Health Rankings in Texas and COVID-19 vaccinations by county in Texas. The variables contained in the County Health Rankings in Texas come partially from my Biostatistics project: county, food environment index, primary care physician population, and urban/rural classification. The variables contained in COVID-19 vaccinations by county in Texas deal with counties, the population who is eligible for vaccination (people 12 and older), and population of fully vaccinated individuals. The food environment index was calculated by measuring access to healthy foods and the income of counties and primary care physician population was found by looking at ratios of population to primary care physicians as well as including D.O.s. Population data was aquired by the 2019 US Census Bureau Population Estimates and the population who have been fully vaccinated or partially vaccinated was collected through vaccination records submitted by health care providers.
+  
+  This data is interesting to me because I want to see if there's any sort of relationship to be found within between the two datasets. The food environment index takes into account access to supermarkets and grocery stores, which usually also have pharmacies as well where vaccinations can be given. There are 254 observations total. There are some observations with NA values, when they are removed the total is 232. Of those 254 observations, 172 are rural and 82 are urban! Of those the set with no NA values, there are 156 that are rural and 76 that are urban.
 
 ```{R}
 library(tidyverse)
-# read your datasets in here, e.g., with read_csv()
+countyhealth <- read_csv("~/Data from County Health Rankings and Biostats project.csv")
+countyvaccines <- read_csv("~/COVID-19 Vaccine Data by County.csv")
+inner_join(countyhealth,countyvaccines, by="county") -> combinedcounty
+combinedcounty %>% mutate(percentage.fully.vaccinated = (people.fully.vaccinated/population.12.and.older)*100,percentage.vaccinated.with.at.least.one.dose = (people.vaccinated.with.at.least.one.dose/population.12.and.older)*100) %>% select (-total.doses.allocated, - vaccine.doses.administered, - people.fully.vaccinated, - people.vaccinated.with.at.least.one.dose) -> combinedcountyfinal
+combinedcountyfinal %>% mutate(urban = ifelse(urban.rural.classification=="Urban",1,0)) -> combinedcountyfinal
+combinedcountyfinalnona <- combinedcountyfinal %>% na.omit()
+combinedcountyfinalnona %>% group_by(urban.rural.classification) %>% summarize(count=n())
 
-# if your dataset needs tidying, do so here
-
-# any other code here
 ```
 
 ### Cluster Analysis
 
 ```{R}
 library(cluster)
-# clustering code here
+clust_dat <- combinedcountyfinal %>% dplyr::select(food.environment.index, percentage.fully.vaccinated, primary.care.physician.population) %>% na.omit()
+
+clust_dat <- clust_dat %>% na.omit() %>% scale
+
+sil_width<-vector()
+for(i in 2:10){  
+  pam_fit <- pam(clust_dat, k = i)  
+  sil_width[i] <- pam_fit$silinfo$avg.width  
+}
+ggplot()+geom_line(aes(x=1:10,y=sil_width))+scale_x_continuous(name="k",breaks=1:10)
+
+
+final <- clust_dat %>% as.data.frame
+pam1 <- final %>% pam(4)
+pam1
+
+
+final <- final %>% mutate(cluster=as.factor(pam1$clustering))
+ggplot(final, aes(x=food.environment.index,y=percentage.fully.vaccinated, color=cluster))+geom_point()
+
+final%>%slice(pam1$id.med)
+
+
+library(plotly)
+final%>%plot_ly(x= ~food.environment.index,  y = ~percentage.fully.vaccinated, z = ~primary.care.physician.population, color= ~cluster, type = "scatter3d", mode = "markers")
+
+plot(pam1,which=2)
+
+library(GGally)
+ggpairs(final, aes(color=cluster))
 ```
 
-Discussion of clustering here
+When I scaled and standardized all the data, I thought it was interesting to see that there were negative values within my data. I chose to do 4 clusters as it had the highest silhouette width. Cluster 4 seems to have all high values of food.environment.index, percentage of fully vaccinated people, and primary care physicians. Cluster 3 seems to have really low food environment index, medium level percentage of fully vaccinated people, and somewhat low primary care physicians. Cluster 2 has a medium food environment index, medium percentage of fully vaccinated people, and a low population of primary care physicians. Cluster 1 has low values of food environment index, fully vaccinated people, and primary care physicians. In the end, I don't think the goodness-of-fit was that great, the highest average silhouette width was only .34 which means the structure is weak and may be artificial.
     
-    
+
 ### Dimensionality Reduction with PCA
 
 ```{R}
-# PCA code here
+countyfinal <- combinedcountyfinal %>%  na.omit() %>% select(-urban) %>% select_if(is.numeric) %>% scale
+rownames(countyfinal) <- combinedcountyfinalnona$county
+county_pca <-  princomp(countyfinal, cor=T)
+names(county_pca)
+summary(county_pca, loadings=T)
+
+countydf<-data.frame(County=combinedcountyfinalnona$county, PC1=county_pca$scores[, 1],PC2=county_pca$scores[, 2])
+ggplot(countydf, aes(PC1, PC2)) + geom_point()
 ```
 
-Discussions of PCA here. 
+I decided to retain PC1 and PC2 as they were enough to explain about 81% of the total variance in the dataset. For PC1, a high score means higher population of people 12 and older, as well as primary care physicians. It also means a larger percentage that are vaccinated with one dose and fully vaccinated. A lower score for PC1 means a lower population of people 12 and older and lower number of primary care physicians. It also means a lower percentage that are vaccinated with one dose and fully vaccinated. Interestingly, the food environment index does not play a big role in PC1. 
+
+For PC2 a high score means high food environment index, primary care physician population, population 12 and older, but a lower percentage fully vaccinated and lower percentage vaccinated with at least one dose. A low score for PC2 means lower food environment index, primary care physician, and population of people 12 and older. It also means higher percentage of people vaccinated with at least one dose (and fully vaccinated).
 
 ###  Linear Classifier
 
 ```{R}
-# linear classifier code here
+library(caret)
+
+fit <- glm(urban~ food.environment.index+primary.care.physician.population+population.12.and.older+percentage.fully.vaccinated
++percentage.vaccinated.with.at.least.one.dose, data=combinedcountyfinalnona, family="binomial")
+coef(fit) 
+probs<-predict(fit,type="response")
+probs %>% round(3)
+class_diag(probs,combinedcountyfinalnona$urban,positive=1)
+
+
+table(truth = combinedcountyfinalnona$urban, prediction = probs>.5) %>% addmargins
 ```
 
 ```{R}
-# cross-validation of linear classifier here
+cv <- trainControl(method="cv", number = 8, classProbs = T, savePredictions = T)
+fit <- train(urban ~food.environment.index+primary.care.physician.population+population.12.and.older+percentage.fully.vaccinated
++percentage.vaccinated.with.at.least.one.dose, data=combinedcountyfinalnona, trControl=cv, method="glm")
+class_diag(fit$pred$pred, fit$pred$obs, positive=1)
 ```
 
-Discussion here
+The values is 1 for urban and 0 for rural. The model is pretty fair in predicting the new observations per CV AUC. There is definitely signs of overfitting as the CV AUC is less when compared to the regular AUC. The confusion matrix is interesting in that it mostly predicts urban counties correctly, but utterly fails as it tries to predicts rural counties.
 
 ### Non-Parametric Classifier
 
 ```{R}
 library(caret)
-# non-parametric classifier code here
+knn_fit<- knn3(urban ~ food.environment.index+primary.care.physician.population+population.12.and.older+percentage.fully.vaccinated
++percentage.vaccinated.with.at.least.one.dose, data=combinedcountyfinalnona,k=8)
+y_hat_knn <- predict(knn_fit,combinedcountyfinalnona)
+y_hat_knn
+
+class_diag(y_hat_knn[,2],combinedcountyfinalnona$urban, positive=1)
+
+table(truth= factor(combinedcountyfinalnona$urban==1, levels=c("TRUE","FALSE")),
+      prediction= factor(y_hat_knn[,2]>.5, levels=c("TRUE","FALSE"))) %>% addmargins
 ```
 
 ```{R}
-# cross-validation of np classifier here
+cv <- trainControl(method="cv", number = 8, classProbs = T, savePredictions = T)
+fit <- train(urban ~ food.environment.index+primary.care.physician.population+population.12.and.older+percentage.fully.vaccinated
++percentage.vaccinated.with.at.least.one.dose, data=combinedcountyfinalnona, trControl=cv, method="knn")
+class_diag(fit$pred$pred, fit$pred$obs, positive=1)
 ```
 
-Discussion
+The model is good at predicting new observations per CV AUC. There are signs of overfitting as the CV AUC is less than the regular AUC. The nonparametric model is actually better than the linear model in its cross-validation performance, the AUC is higher. The confusion matrix predicted more rural counties correctly than the linear classifier confusion matrix.
 
 
 ### Regression/Numeric Prediction
 
 ```{R}
-# regression model code here
+
+fit <- lm(percentage.fully.vaccinated~primary.care.physician.population+food.environment.index,data=combinedcountyfinalnona)
+yhat<-predict(fit)
+mean((combinedcountyfinalnona$percentage.fully.vaccinated-yhat)^2)
 ```
 
 ```{R}
-# cross-validation of regression model here
+k=8
+data<-combinedcountyfinalnona[sample(nrow(combinedcountyfinalnona)),]
+folds<-cut(seq(1:nrow(combinedcountyfinalnona)),breaks=k,labels=F) 
+diags<-NULL
+for(i in 1:k){
+  train<-data[folds!=i,]
+  test<-data[folds==i,]
+  fit<-lm(percentage.fully.vaccinated ~ primary.care.physician.population+food.environment.index, data=train)
+  yhat<-predict(fit,newdata=test)
+  diags<-mean((test$percentage.fully.vaccinated-yhat)^2) 
+}
+mean(diags)
 ```
 
-Discussion
+The MSE for the overall dataset was 113.1287. There is definitely signs of overfitting as the average MSE from my k testing folds were higher than the MSE for the overall dataset. It is weird to note that the average MSE would sometimes be bigger than the dataset's MSE and sometimes be smaller than the dataset's MSE. 
 
 ### Python 
 
 ```{R}
 library(reticulate)
+hi<-"Hello"
+combinedcounty %>% mutate(percentage.fully.vaccinated = (people.fully.vaccinated/population.12.and.older)*100,percentage.vaccinated.with.at.least.one.dose = (people.vaccinated.with.at.least.one.dose/population.12.and.older)*100)
 ```
 
 ```{python}
-# python code here
+import pandas as pd
+(r.combinedcounty.assign(PercentageofFullyVaccinated = lambda x: (r.combinedcounty["people.fully.vaccinated"]/r.combinedcounty["population.12.and.older"])*100)
+.assign(PercentageofVaccinatedatleastonedose= lambda x:(r.combinedcounty["people.vaccinated.with.at.least.one.dose"]/r.combinedcounty["population.12.and.older"])*100)
+.sort_values(by=('PercentageofFullyVaccinated'), ascending=True))
 ```
 
-Discussion
-
-### Concluding Remarks
-
-Include concluding remarks here, if any
+In python, I was able to recalculate my dataset's percentage of people fully vaccinated and percentage of people vaccinated with one dose through Python's version of tidyverse!
 
 
 
