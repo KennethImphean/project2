@@ -196,7 +196,7 @@ for(i in 1:k){
 mean(diags)
 ```
 
-The MSE for the overall dataset was 113.1287. There is definitely signs of overfitting as the average MSE from my k testing folds were higher than the MSE for the overall dataset. It is weird to note that the average MSE would sometimes be bigger than the dataset's MSE and sometimes be smaller than the dataset's MSE. 
+The MSE for the overall dataset was 113.1287. There is definitely signs of overfitting as the average MSE from my k testing folds were higher than the MSE for the overall dataset.
 
 ### Python 
 
